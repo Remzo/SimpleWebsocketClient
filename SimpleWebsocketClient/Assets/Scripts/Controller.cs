@@ -17,6 +17,8 @@ public class Controller : MonoBehaviour {
     private Text m_MessageBox = null;
     [SerializeField]
     private Text m_DataBox = null;
+    [SerializeField]
+    private InputField m_SenderInputField = null;
     [Header("UI Sender")]
     [SerializeField]
     private GameObject m_Sender = null;
@@ -31,12 +33,15 @@ public class Controller : MonoBehaviour {
     private Text m_ReceiverMessageBox = null;
     [SerializeField]
     private GameObject m_GetDataButton = null;
+    [SerializeField]
+    private GameObject m_ReceiverInputField = null;
 
     private bool b_CallbacksRegistered = false;
 
     private bool b_Connected = false;
     private bool b_IsSender = false;
 
+    private bool b_ConnectionResultAvailable = false;
     private bool b_ConnectionIDReceived = false;
     private bool b_ItemDataRecieved = false;
 
@@ -89,21 +94,44 @@ public class Controller : MonoBehaviour {
         m_CentralServer.DeregisterCustomCallback("ItemReceived");
     }
 
-    private void OnConnected()
+    private void OnConnected(bool connected)
     {
-        //handle state on connect
-        b_Connected = true;
-        if (b_IsSender)
+        b_Connected = connected;
+        b_ConnectionResultAvailable = true;
+        Debug.Log("Connection result received: " + connected.ToString());
+    }
+
+    private IEnumerator WaitForConnectionResponse()
+    {
+        while (!b_ConnectionResultAvailable)
         {
-            m_CentralServer.SendToServer("Host", m_ItemID); //send host message and itemID to server to receive connection ID
-            StartCoroutine(WaitForConnectionID()); //start coroutine to wait for connection id
-            StartCoroutine(WaitForItemReceived());//start coroutine to wait for item received
+            yield return new WaitForEndOfFrame();
+        }
+        b_ConnectionResultAvailable = false;
+
+        if (b_Connected)
+        {
+            //handle state on connect
+            b_Connected = true;
+            if (b_IsSender)
+            {
+                m_CentralServer.SendToServer("Host", m_ItemID); //send host message and itemID to server to receive connection ID
+                StartCoroutine(WaitForConnectionID()); //start coroutine to wait for connection id
+                StartCoroutine(WaitForItemReceived());//start coroutine to wait for item received
+            }
+            else
+            {
+                m_CentralServer.SendToServer("GetItem", m_ConnectionID);
+                StartCoroutine(WaitForItemID());
+            }
         }
         else
         {
-            m_CentralServer.SendToServer("GetItem", m_ConnectionID);
-            StartCoroutine(WaitForItemID());
+            //handle state on failed connection
+            BackToPrompt();
         }
+
+        yield return null;
     }
 
     private void OnDisconnect()
@@ -117,8 +145,10 @@ public class Controller : MonoBehaviour {
         //handle state on error
     }
 
-    private void OnConnectionIDReceived(string connectionID)
+    private void OnConnectionIDReceived(JSONObject data)
     {
+        string connectionID = RemoveFirstAndLastChar(data.list[1].ToString());
+
         Debug.Log("ConnectionID: " + connectionID);
 
         m_ConnectionID = connectionID; //set connection ID for display
@@ -141,12 +171,12 @@ public class Controller : MonoBehaviour {
         yield return null;
     }
 
-    private void OnItemReceived(string msg)
+    private void OnItemReceived(JSONObject msg)
     {
+        Debug.Log("Item received by receiver.");
+
         //item received by reciever
         b_ItemDataRecieved = true;
-
-        Debug.Log("Item received by receiver.");
     }
 
     private IEnumerator WaitForItemReceived()
@@ -155,6 +185,10 @@ public class Controller : MonoBehaviour {
         {
             yield return new WaitForEndOfFrame();
         }
+
+        m_SenderConnectionID.text = "-";
+
+        m_SenderMessageBox.text = "Item received by receiver.";
 
         //close connection
         Disconnect();
@@ -169,24 +203,28 @@ public class Controller : MonoBehaviour {
 
     public void GetItemFromConnectionID()
     {
-        if (!IsOnline())
+        if (!IsOnline()) //ensure internet access
         {
-            m_DataBox.text = "Please connect to the internet.";
+            m_ReceiverMessageBox.text = "Please connect to the internet";
             return;
         }
 
         if (m_ConnectionID == "") //connection ID validation goes here
         {
-            Debug.LogWarning("Input valid connection id");
+            m_ReceiverMessageBox.text = "Input a valid connection id";
             return;
         }
 
-        m_CentralServer.Connect();
+        Connect();
         m_GetDataButton.SetActive(false);
+        m_ReceiverInputField.SetActive(false);
+        m_ReceiverMessageBox.text = "Getting data from connectionID: " + m_ConnectionID;
     }
 
-    private void OnItemIDReceived(string itemID)
+    private void OnItemIDReceived(JSONObject data)
     {
+        string itemID = RemoveFirstAndLastChar(data.list[1].ToString());
+
         Debug.Log("ItemID: " + itemID);
 
         m_ItemID = itemID; //set item ID for display
@@ -203,13 +241,16 @@ public class Controller : MonoBehaviour {
 
         if (m_ItemID == "INVALID") //item id validation here
         {
-            m_DataBox.text = "Invalid connection ID";
+            //m_DataBox.text = "Invalid connection ID";
+            m_ReceiverMessageBox.text = "Invalid ConnectionID.";
             m_GetDataButton.SetActive(true);
+            m_ReceiverInputField.SetActive(true);
         }
         else
         {
             m_DataBox.text = "Data: " + m_ItemID;
             m_CentralServer.SendToServer("ItemReceived", m_ConnectionID);
+            m_ReceiverMessageBox.text = "Data received.";
         }
 
         Disconnect();//disconnect from central server
@@ -222,19 +263,19 @@ public class Controller : MonoBehaviour {
 
     public void PutItemUpForGrabs()
     {
-        if (!IsOnline())
+        if (!IsOnline()) //ensure internet access
         {
             m_MessageBox.text = "Please connect to the internet.";
             return;
         }
 
-        if (m_ItemID == "")
+        if (m_ItemID == "") //item id validation goes here
         {
             m_MessageBox.text = "Enter an itemID to send";
             return;
         }
         b_IsSender = true;
-        m_CentralServer.Connect();
+        Connect();
 
         //init UI
         m_Prompt.SetActive(false);
@@ -254,6 +295,8 @@ public class Controller : MonoBehaviour {
         m_Receiver.SetActive(true);
         m_Common.SetActive(true);
         m_GetDataButton.SetActive(true);
+        m_ReceiverMessageBox.text = "";
+        m_ReceiverInputField.SetActive(true);
     }
 
     public void BackToPrompt()
@@ -266,6 +309,15 @@ public class Controller : MonoBehaviour {
         m_Receiver.SetActive(false);
         m_MessageBox.text = "";
         m_DataBox.text = "";
+        m_ItemID = "";
+        m_ConnectionID = "";
+        m_SenderInputField.text = "";
+    }
+
+    private void Connect()
+    {
+        StartCoroutine(WaitForConnectionResponse());
+        m_CentralServer.Connect();
     }
 
     private bool IsOnline()
@@ -282,4 +334,18 @@ public class Controller : MonoBehaviour {
             m_CentralServer.Disconnect();
         }
     }
+
+    private string RemoveFirstAndLastChar(string str)
+    {
+        if (str.Length >= 4)
+        {
+            return str.Substring(1, str.Length - 2);
+        }
+        else
+        {
+            Debug.LogWarning("Invalid str. Too short.");
+            return str;
+        }
+    }
+
 }

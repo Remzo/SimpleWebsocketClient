@@ -12,14 +12,15 @@ using WebSocketSharp;
 public class CentralServerConnection : MonoBehaviour {
 
     public delegate void ConnectionCallback();
-    public delegate void ConnectionCallbackString(string data);
+    public delegate void ConnectionCallbackBool(bool val);
+    public delegate void ConnectionCallbackString(JSONObject data);
 
-    public ConnectionCallback OnConnectCallback;
+    public ConnectionCallbackBool OnConnectCallback;
     public ConnectionCallback OnDisconnectCallback;
     public ConnectionCallback OnErrorCallback;
 
     private SocketIOComponent m_Socket = null;
-    private Dictionary<string, Action<string>> m_RegisteredCallbacks = new Dictionary<string, Action<string>>();
+    private Dictionary<string, Action<JSONObject>> m_RegisteredCallbacks = new Dictionary<string, Action<JSONObject>>();
 
     private void Awake()
     {
@@ -29,7 +30,7 @@ public class CentralServerConnection : MonoBehaviour {
         m_Socket.On("connect", OnConnect);
         m_Socket.On("disconnect", OnDisconnect);
         m_Socket.On("error", OnError);
-        m_Socket.On("ConnectionID", OnConnectionID);
+        m_Socket.On("ConnectionFailed", OnConnectionFailed);
     }
 
     private void OnEnable()
@@ -52,7 +53,7 @@ public class CentralServerConnection : MonoBehaviour {
         m_Socket.Close();
     }
 
-    public void RegisterCustomCallback(string key, Action<string> callback)
+    public void RegisterCustomCallback(string key, Action<JSONObject> callback)
     {
         if (!m_RegisteredCallbacks.ContainsKey(key))
         {
@@ -95,9 +96,19 @@ public class CentralServerConnection : MonoBehaviour {
         Debug.Log("Connection established");
         if (OnConnectCallback != null)
         {
-            OnConnectCallback();
+            OnConnectCallback(true);
         }
     }
+
+    private void OnConnectionFailed(SocketIOEvent e)
+    {
+        Debug.Log("Connection failed.");
+        if (OnConnectCallback != null)
+        {
+            OnConnectCallback(false);
+        }
+    }
+
 
     private void OnDisconnect(SocketIO.SocketIOEvent e)
     {
@@ -110,7 +121,7 @@ public class CentralServerConnection : MonoBehaviour {
 
     private void OnError(SocketIO.SocketIOEvent e)
     {
-        Debug.LogWarning("WebSocket error.");
+        //Debug.LogWarning("WebSocket error.");
         if (OnErrorCallback != null)
         {
             OnErrorCallback();
@@ -128,33 +139,22 @@ public class CentralServerConnection : MonoBehaviour {
         var msgType = RemoveFirstAndLastChar(packet.json.list[0].ToString()); // get msg key and remove quotations
         Debug.Log("Packet message type: " + msgType);
 
-        var stringData = RemoveFirstAndLastChar(packet.json.list[1].ToString());
-
+        //check if a callback has been registered for the message type
         if (m_RegisteredCallbacks.ContainsKey(msgType))
         {
             if (m_RegisteredCallbacks[msgType] != null)
             {
-                m_RegisteredCallbacks[msgType](stringData);
+                Debug.Log("Callback for " + msgType);
+                m_RegisteredCallbacks[msgType](packet.json); //trigger callback
             }
         }
         else
         {
             Debug.LogWarning("No callback registered for key: " + msgType);
         }
-
-        //if (msgType == "ConnectionID")
-        //{
-        //    var rawMsg = packet.json.list[1].ToString();
-        //    var connectionID = rawMsg.Substring(1, rawMsg.Length - 2);
-
-        //    Debug.Log("connectionID: " + connectionID);
-        //}
     }
 
-    private void Update()
-    {
-    }
-
+    //Utility function to remove the first and last characters of a string. Used to remove quotations marks from packet json data
     private string RemoveFirstAndLastChar(string str)
     {
         if (str.Length >= 4)
@@ -167,4 +167,5 @@ public class CentralServerConnection : MonoBehaviour {
             return str;
         }
     }
+
 }

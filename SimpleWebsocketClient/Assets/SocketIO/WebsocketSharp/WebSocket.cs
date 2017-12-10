@@ -879,7 +879,7 @@ namespace WebSocketSharp
           }
         }
         catch (Exception ex) {
-          acceptException (ex, "An exception has occurred while connecting.");
+            UnityEngine.Debug.LogWarning("Unable to connect.");
         }
 
         return false;
@@ -1299,7 +1299,7 @@ namespace WebSocketSharp
                 }
               }
               catch (Exception ex) {
-                //acceptException (ex, "An exception has occurred while OnMessage | " + ex.Message);
+                acceptException (ex, "An exception has occurred while OnMessage | " + ex.Message);
               }
             }
           }

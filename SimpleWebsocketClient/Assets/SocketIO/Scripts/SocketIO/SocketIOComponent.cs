@@ -45,9 +45,11 @@ namespace SocketIO
 		public string url = "ws://127.0.0.1:4567/socket.io/?EIO=4&transport=websocket";
 		public bool autoConnect = true;
 		public int reconnectDelay = 5;
-		public float ackExpirationTime = 1800f;
+        public int maxRetries = 3;
+        public float ackExpirationTime = 1800f;
 		public float pingInterval = 25f;
 		public float pingTimeout = 60f;
+
 
 		public WebSocket socket { get { return ws; } }
 		public string sid { get; set; }
@@ -56,9 +58,11 @@ namespace SocketIO
         public delegate void CustomPacketHandler(Packet packet);
         public CustomPacketHandler OnHandlePacket;
 
-		#endregion
+        #endregion
 
-		#region Private Properties
+        #region Private Properties
+
+        private int retries = 0;
 
 		private volatile bool connected;
 		private volatile bool thPinging;
@@ -174,8 +178,9 @@ namespace SocketIO
 		public void Connect()
 		{
 			connected = true;
+            retries = 0;
 
-			socketThread = new Thread(RunSocketThread);
+            socketThread = new Thread(RunSocketThread);
 			socketThread.Start(ws);
 
 			pingThread = new Thread(RunPingThread);
@@ -255,7 +260,18 @@ namespace SocketIO
 				if(webSocket.IsConnected){
 					Thread.Sleep(reconnectDelay);
 				} else {
-					webSocket.Connect();
+                    if (retries < maxRetries)
+                    {
+                        Debug.Log("Connection attempt " + (retries+1).ToString());
+                        webSocket.Connect();
+                        retries++;
+                    }
+                    else
+                    {
+                        Debug.Log("Retries exceeded, closing...");
+                        EmitEvent("ConnectionFailed");
+                        Close();
+                    }
 				}
 			}
 			webSocket.Close();
@@ -394,7 +410,7 @@ namespace SocketIO
 		private void OnError(object sender, ErrorEventArgs e)
 		{
 			EmitEvent("error");
-            Debug.LogWarning(e.Message);
+            //Debug.LogWarning(e.Message);
 		}
 
 		private void OnClose(object sender, CloseEventArgs e)
